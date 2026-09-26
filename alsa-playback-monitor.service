@@ -1,0 +1,17 @@
+[Unit]
+Description=ALSA playback monitor
+After=sound.target
+
+[Service]
+ExecStart=/usr/local/bin/alsa-playback-monitor
+Restart=on-failure
+RestartSec=5
+
+# Needs no privileges: /dev/snd and /proc/asound are world-readable.
+# Don't add PrivateDevices= or ProtectProc=; they would hide the devices and
+# other processes' names. Hook commands run as this same unprivileged,
+# sandboxed user; see README.md for giving them more access.
+DynamicUser=yes
+
+[Install]
+WantedBy=multi-user.target

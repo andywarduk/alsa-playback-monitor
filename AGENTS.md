@@ -17,10 +17,14 @@ A single-binary Rust tool that reports when ALSA playback starts and stops. It i
 cargo build --release
 cargo test
 cargo clippy --all-targets   # must stay warning-free
-cargo install --path .       # updates ~/.cargo/bin/alsa-playback-monitor
+./install.sh                 # build, install to /usr/local, enable and restart the service
+./install.sh uninstall
+./log.sh [journalctl args]   # the service's journal, e.g. ./log.sh -f
 ```
 
-`.cargo/config.toml` builds with `-Ctarget-cpu=native` on aarch64, the same setup as the other projects in `~/Git`. On the development Pi (a 3B+) that means Cortex-A53. `cargo install --path` honours this config even when run from outside the project.
+`install.sh` must run as a normal user. It refuses to run as root, and it uses sudo only for the install steps. It installs the binary to `/usr/local/bin` and `alsa-playback-monitor.service` to `/usr/local/lib/systemd/system`. It rewrites the unit's `ExecStart` path if `PREFIX` is set. The service runs with `DynamicUser=yes`. Don't add `PrivateDevices=` or `ProtectProc=`: they hide `/dev/snd` and other processes' names. After changing the code or the unit, rerun `./install.sh` and check `./log.sh`.
+
+`.cargo/config.toml` builds with `-Ctarget-cpu=native` on aarch64, the same setup as the other projects in `~/Git`. On the development Pi (a 3B+) that means Cortex-A53. The release profile also uses `lto = true` and `opt-level = "s"`, so release rebuilds take about 45 s on the Pi. Use debug builds (`cargo build`, `cargo test`) while iterating.
 
 ## Design rules
 

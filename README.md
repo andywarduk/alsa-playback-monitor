@@ -18,11 +18,19 @@ It is event-driven rather than polled. It sleeps in the kernel until a playback 
 
 Linux only. It depends on the `nix` crate for inotify and `poll`, and on `chrono` for timestamps.
 
+Run this as your normal user. It builds with cargo, then uses sudo for the install steps:
+
 ```bash
-cargo install --path .
+./install.sh
 ```
 
-The binary is installed to `~/.cargo/bin/alsa-playback-monitor`.
+It installs:
+- the binary to `/usr/local/bin/alsa-playback-monitor`
+- a systemd service, `alsa-playback-monitor.service`, to `/usr/local/lib/systemd/system`
+
+The service is enabled at boot and (re)started immediately. Rerun the script after changing the code.
+
+To install under `/usr` instead, run `PREFIX=/usr ./install.sh`. To remove everything, run `./install.sh uninstall`. If you used a `PREFIX`, pass the same one when uninstalling.
 
 ## Usage
 
@@ -51,6 +59,42 @@ If several playback streams are open at once, their details are separated by `; 
 Commands run through `/bin/sh -c`, and only when the state changes. They do not run for the startup state. They run one at a time, and the monitor waits for each to finish, so a stop command can never overtake the start command before it.
 
 No special permissions are needed: any user can read `/dev/snd` and `/proc/asound`.
+
+## The service
+
+The service's output goes to the journal. `./log.sh` prints it, and passes any extra arguments on to `journalctl`:
+
+```bash
+./log.sh                 # everything so far
+./log.sh -f              # follow new entries
+./log.sh --since today
+```
+
+By default the service only logs. To add options such as hook commands, override `ExecStart` with a drop-in:
+
+```bash
+sudo systemctl edit alsa-playback-monitor
+```
+
+In the editor, add:
+
+```ini
+[Service]
+ExecStart=
+ExecStart=/usr/local/bin/alsa-playback-monitor --on-start '/home/ajw/amp-on.sh' --on-stop '/home/ajw/amp-off.sh' --stop-delay 30
+```
+
+The empty `ExecStart=` line is required: it clears the original command. The override is stored in `/etc/systemd/system/alsa-playback-monitor.service.d/` and survives reinstalls.
+
+The service runs as a throwaway unprivileged user (`DynamicUser=yes`), and hook commands run as that user too. The sandbox has these limits:
+- the filesystem is read-only
+- home directories are readable, not writable
+- `/tmp` is private
+- `sudo` and other setuid programs don't work
+
+A hook that needs more access can get it in the same drop-in:
+- **Hardware access:** add `SupplementaryGroups=gpio`, or whichever group owns the device the hook uses.
+- **Full access:** add `DynamicUser=no` and `User=ajw` to run hooks as you, without the sandbox.
 
 ## How it works
 
