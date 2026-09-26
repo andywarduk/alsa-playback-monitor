@@ -1,0 +1,5 @@
+# Use native CPU
+# Current triple can be printed with: rustc -vV
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-Ctarget-cpu=native"]
