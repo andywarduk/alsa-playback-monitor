@@ -4,20 +4,19 @@ use std::process;
 use std::time::Duration;
 
 const USAGE: &str = "\
-usage: alsa-playback-monitor [--on-start CMD] [--on-stop CMD] [--start-delay SEC] [--stop-delay SEC]
+usage: alsa-playback-monitor [--hook PROGRAM] [--start-delay SEC] [--stop-delay SEC]
 
 Report when ALSA playback starts and stops.
 
 options:
-  --on-start CMD     shell command to run when playback starts
-  --on-stop CMD      shell command to run when playback stops
+  --hook PROGRAM     program to run on each change; the new state (\"playing\" or
+                     \"stopped\") and details are in PLAYBACK_* variables
   --start-delay SEC  playback must last this long before it is reported (default 0.2)
   --stop-delay SEC   silence must last this long before it is reported (default 1.0)
 ";
 
 pub struct Args {
-    pub on_start: Option<String>,
-    pub on_stop: Option<String>,
+    pub hook: Option<String>,
     pub start_delay: Duration,
     pub stop_delay: Duration,
 }
@@ -26,8 +25,7 @@ impl Args {
     /// Parse the process arguments, exiting with usage on error or `--help`.
     pub fn parse() -> Self {
         let mut args = Self {
-            on_start: None,
-            on_stop: None,
+            hook: None,
             start_delay: Duration::from_millis(200),
             stop_delay: Duration::from_secs(1),
         };
@@ -42,15 +40,14 @@ impl Args {
                     print!("{USAGE}");
                     process::exit(0);
                 }
-                "--on-start" | "--on-stop" | "--start-delay" | "--stop-delay" => {}
+                "--hook" | "--start-delay" | "--stop-delay" => {}
                 _ => usage_error(&format!("unrecognized argument: {arg}")),
             }
             let Some(value) = inline.or_else(|| argv.next()) else {
                 usage_error(&format!("{flag} needs a value"));
             };
             match flag {
-                "--on-start" => args.on_start = Some(value),
-                "--on-stop" => args.on_stop = Some(value),
+                "--hook" => args.hook = Some(value).filter(|program| !program.is_empty()),
                 "--start-delay" => args.start_delay = seconds(flag, &value),
                 _ => args.stop_delay = seconds(flag, &value),
             }

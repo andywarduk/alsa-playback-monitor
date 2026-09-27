@@ -3,7 +3,8 @@ Description=ALSA playback monitor
 After=sound.target
 
 [Service]
-ExecStart=/usr/local/bin/alsa-playback-monitor
+# install.sh installs the hook from examples/hook.sh if it doesn't exist.
+ExecStart=/usr/local/bin/alsa-playback-monitor --hook /etc/alsa-playback-monitor/hook.sh
 Restart=on-failure
 RestartSec=5
 

@@ -1,6 +1,7 @@
 //! What /proc/asound says about open playback devices, and who owns them.
 
 use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -37,26 +38,69 @@ pub fn count_open(active: &Active) -> HashMap<Node, u32> {
     active.iter().map(|(&node, subs)| (node, u32::try_from(subs.len()).unwrap_or(u32::MAX))).collect()
 }
 
-/// One "hw:C,D program[pid] STATE FORMAT RATEHz CHANNELSch" entry per open
-/// substream, joined with "; ".
-pub fn describe(active: &Active) -> String {
-    let mut parts = Vec::new();
-    for (&(card, dev), subs) in active {
+/// One open playback substream.
+pub struct Stream {
+    pub card: u32,
+    pub device: u32,
+    /// Program name (argv[0]), if the owning process could be read.
+    pub program: Option<String>,
+    /// Owning process id: the thread group id when known.
+    pub pid: String,
+    /// ALSA PCM state, e.g. RUNNING or PREPARED.
+    pub state: String,
+    /// Absent until the player has configured the device.
+    pub hw: Option<HwParams>,
+}
+
+pub struct HwParams {
+    pub format: String,
+    pub rate: String,
+    pub channels: String,
+}
+
+/// "hw:C,D program[pid] STATE FORMAT RATEHz CHANNELSch"
+impl fmt::Display for Stream {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "hw:{},{} ", self.card, self.device)?;
+        match &self.program {
+            Some(program) => write!(f, "{program}[{}]", self.pid)?,
+            None => write!(f, "pid {}", self.pid)?,
+        }
+        if !self.state.is_empty() {
+            write!(f, " {}", self.state)?;
+        }
+        if let Some(hw) = &self.hw {
+            write!(f, " {} {}Hz {}ch", hw.format, hw.rate, hw.channels)?;
+        }
+        Ok(())
+    }
+}
+
+/// Details of every open substream in `active`.
+pub fn streams(active: &Active) -> Vec<Stream> {
+    let mut streams = Vec::new();
+    for (&(card, device), subs) in active {
         for (sub_dir, status) in subs {
-            let hw = read_kv(&sub_dir.join("hw_params")); // empty until configured
-            let fmt = match (hw.get("format"), hw.get("rate"), hw.get("channels")) {
-                (Some(format), Some(rate), Some(channels)) => {
-                    let rate = rate.split_whitespace().next().unwrap_or(rate);
-                    format!("{format} {rate}Hz {channels}ch")
-                }
-                _ => String::new(),
+            let params = read_kv(&sub_dir.join("hw_params")); // empty until configured
+            let hw = match (params.get("format"), params.get("rate"), params.get("channels")) {
+                (Some(format), Some(rate), Some(channels)) => Some(HwParams {
+                    format: format.clone(),
+                    rate: rate.split_whitespace().next().unwrap_or(rate).to_owned(),
+                    channels: channels.clone(),
+                }),
+                _ => None,
             };
-            let owner = process_name(status.get("owner_pid").map_or("?", String::as_str));
-            let state = status.get("state").map_or("", String::as_str);
-            parts.push(format!("hw:{card},{dev} {owner} {state} {fmt}").trim().to_owned());
+            let (program, pid) = owner(status.get("owner_pid").map_or("?", String::as_str));
+            let state = status.get("state").cloned().unwrap_or_default();
+            streams.push(Stream { card, device, program, pid, state, hw });
         }
     }
-    parts.join("; ")
+    streams
+}
+
+/// The streams as logged: each one's text, joined with "; ".
+pub fn describe(streams: &[Stream]) -> String {
+    streams.iter().map(Stream::to_string).collect::<Vec<_>>().join("; ")
 }
 
 /// Parse a /proc "key: value" file; empty if closed/unreadable.
@@ -94,8 +138,9 @@ fn numbered_entries(dir: &Path, prefix: &str, suffix: &str) -> Vec<(PathBuf, u32
     found
 }
 
-/// Name of the process owning `pid` (which may be a thread id).
-fn process_name(pid: &str) -> String {
+/// Program name and process id of the owner of `pid` (which may be a thread
+/// id). The name is `None`, and the pid returned unchanged, if it can't be read.
+fn owner(pid: &str) -> (Option<String>, String) {
     let status = read_kv(Path::new(&format!("/proc/{pid}/status")));
     let tgid = status.get("Tgid").map_or(pid, String::as_str);
     // argv[0] rather than comm: some players rename their main thread
@@ -108,14 +153,44 @@ fn process_name(pid: &str) -> String {
         fs::read_to_string(format!("/proc/{tgid}/comm")).ok().map(|comm| comm.trim().to_owned())
     });
     match name {
-        Some(name) => format!("{}[{tgid}]", name.rsplit('/').next().unwrap_or(&name)),
-        None => format!("pid {pid}"),
+        Some(name) => (Some(name.rsplit('/').next().unwrap_or(&name).to_owned()), tgid.to_owned()),
+        None => (None, pid.to_owned()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stream_text() {
+        let configured = Stream {
+            card: 0,
+            device: 0,
+            program: Some("librespot".to_owned()),
+            pid: "539".to_owned(),
+            state: "RUNNING".to_owned(),
+            hw: Some(HwParams {
+                format: "S16_LE".to_owned(),
+                rate: "44100".to_owned(),
+                channels: "2".to_owned(),
+            }),
+        };
+        let unconfigured = Stream {
+            card: 1,
+            device: 0,
+            program: None,
+            pid: "7".to_owned(),
+            state: "OPEN".to_owned(),
+            hw: None,
+        };
+        assert_eq!(configured.to_string(), "hw:0,0 librespot[539] RUNNING S16_LE 44100Hz 2ch");
+        assert_eq!(unconfigured.to_string(), "hw:1,0 pid 7 OPEN");
+        assert_eq!(
+            describe(&[configured, unconfigured]),
+            "hw:0,0 librespot[539] RUNNING S16_LE 44100Hz 2ch; hw:1,0 pid 7 OPEN"
+        );
+    }
 
     #[test]
     fn playback_node_names() {

@@ -13,12 +13,13 @@
 
 mod args;
 mod asound;
+mod hook;
 mod tracker;
 
 use std::ffi::OsStr;
 use std::io::{self, Write};
 use std::os::fd::AsFd;
-use std::process::{self, Command};
+use std::process;
 use std::time::{Duration, Instant};
 
 use chrono::Local;
@@ -27,6 +28,8 @@ use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 
 use args::Args;
+use asound::Stream;
+use hook::{Change, Hook};
 use tracker::Tracker;
 
 const DEV_DIR: &str = "/dev/snd";
@@ -52,25 +55,36 @@ fn wait_readable(fd: impl AsFd, timeout: Option<Duration>) -> nix::Result<bool> 
     retry_eintr(|| poll(&mut fds, timeout)).map(|ready| ready > 0)
 }
 
-fn report(playing: bool, detail: &str) {
-    let stamp = Local::now().format("%Y-%m-%d %H:%M:%S");
-    let word = if playing { "playing" } else { "stopped" };
+fn timestamp() -> String {
+    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// Print `text` as one output line stamped with `time`. Used from both the
+/// main thread and the hook worker; the lock keeps their lines whole.
+fn log_at(time: &str, text: &str) {
     let mut out = io::stdout().lock();
-    let _ = if detail.is_empty() {
-        writeln!(out, "{stamp} {word}")
-    } else {
-        writeln!(out, "{stamp} {word}  {detail}")
-    };
+    let _ = writeln!(out, "{time} {text}");
     let _ = out.flush();
 }
 
-fn run_hook(cmd: Option<&str>) {
-    let Some(cmd) = cmd.filter(|cmd| !cmd.is_empty()) else {
-        return;
-    };
-    if let Err(err) = Command::new("/bin/sh").arg("-c").arg(cmd).status() {
-        eprintln!("alsa-playback-monitor: cannot run {cmd:?}: {err}");
+fn log(text: &str) {
+    log_at(&timestamp(), text);
+}
+
+fn state_word(playing: bool) -> &'static str {
+    if playing { "playing" } else { "stopped" }
+}
+
+/// Print a state line and return its timestamp.
+fn report(playing: bool, streams: &[Stream]) -> String {
+    let time = timestamp();
+    let word = state_word(playing);
+    if streams.is_empty() {
+        log_at(&time, word);
+    } else {
+        log_at(&time, &format!("{word}  {}", asound::describe(streams)));
     }
+    time
 }
 
 fn run(args: &Args) -> io::Result<()> {
@@ -83,7 +97,8 @@ fn run(args: &Args) -> io::Result<()> {
 
     let active = asound::open_substreams();
     let mut tracker = Tracker::new(asound::count_open(&active), args.start_delay, args.stop_delay);
-    report(tracker.playing(), &asound::describe(&active));
+    report(tracker.playing(), &asound::streams(&active));
+    let hook = args.hook.clone().map(Hook::spawn);
 
     loop {
         if wait_readable(&inotify, tracker.timeout(Instant::now()))? {
@@ -107,8 +122,11 @@ fn run(args: &Args) -> io::Result<()> {
             // A change of state has held for the full delay: report it.
             let active = asound::open_substreams();
             if let Some(playing) = tracker.expire(|node| active.contains_key(node)) {
-                report(playing, &if playing { asound::describe(&active) } else { String::new() });
-                run_hook(if playing { args.on_start.as_deref() } else { args.on_stop.as_deref() });
+                let streams = if playing { asound::streams(&active) } else { Vec::new() };
+                let time = report(playing, &streams);
+                if let Some(hook) = &hook {
+                    hook.queue(Change { playing, time, streams, at: Instant::now() });
+                }
             }
         }
     }
