@@ -113,7 +113,7 @@ The service's output goes to the journal. `./log.sh` prints it with the journal'
 ./log.sh --since today
 ```
 
-The service runs `/etc/alsa-playback-monitor/hook.sh`, so to change what happens on each change, edit that script. No restart is needed: it's run afresh each time.
+The service runs `/etc/alsa-playback-monitor/hook.sh` with `--stop-delay 300`. So "stopped" is reported, and the hook run, only after 5 minutes of silence, and pauses between tracks or short breaks don't trigger it. To change what happens on each change, edit that script. No restart is needed: it's run afresh each time.
 
 To change the options instead, such as the stop delay or which hook runs, override `ExecStart` with a drop-in:
 
@@ -126,7 +126,7 @@ In the editor, add:
 ```ini
 [Service]
 ExecStart=
-ExecStart=/usr/local/bin/alsa-playback-monitor --hook /etc/alsa-playback-monitor/hook.sh --stop-delay 30
+ExecStart=/usr/local/bin/alsa-playback-monitor --hook /etc/alsa-playback-monitor/hook.sh --stop-delay 60
 ```
 
 The empty `ExecStart=` line is required: it clears the original command. The override is stored in `/etc/systemd/system/alsa-playback-monitor.service.d/` and survives reinstalls.

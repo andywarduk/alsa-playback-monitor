@@ -4,7 +4,9 @@ After=sound.target
 
 [Service]
 # install.sh installs the hook from examples/hook.sh if it doesn't exist.
-ExecStart=/usr/local/bin/alsa-playback-monitor --hook /etc/alsa-playback-monitor/hook.sh
+# "stopped" is reported only after 5 minutes of silence, so pauses between
+# tracks or short breaks don't trigger the hook.
+ExecStart=/usr/local/bin/alsa-playback-monitor --hook /etc/alsa-playback-monitor/hook.sh --stop-delay 300
 Restart=on-failure
 RestartSec=5
 
