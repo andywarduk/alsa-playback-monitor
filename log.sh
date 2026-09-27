@@ -5,10 +5,10 @@
 # defaults here, e.g.:
 #   ./log.sh -f              follow new entries
 #   ./log.sh --since today   today's entries only
-#   ./log.sh -o short        add the journal's own timestamps and PIDs
+#   ./log.sh -o cat          messages only, without timestamps
 #
-# The monitor's lines carry their own timestamps, so the default output shows
-# messages only. Reading the system journal needs membership of the adm or
-# systemd-journal group (or sudo).
+# Under systemd the monitor leaves timestamps to the journal. (Entries logged
+# before it did so carry both.) Reading the system journal needs membership of
+# the adm or systemd-journal group (or sudo).
 
-exec journalctl --unit alsa-playback-monitor --output cat --no-pager "$@"
+exec journalctl --unit alsa-playback-monitor --no-hostname --no-pager "$@"

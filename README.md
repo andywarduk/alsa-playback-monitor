@@ -56,6 +56,8 @@ The first line of output is the state at startup. After that there is one line p
 
 If several playback streams are open at once, their details are separated by `; `. The format fields are omitted if the player hasn't configured the device yet.
 
+When its output goes to the systemd journal, as it does for the service, the monitor leaves out the `<date> <time>` prefix, because the journal timestamps every line itself. It detects this from `JOURNAL_STREAM`, which it checks against its actual stdout, so the check isn't fooled by a value inherited from elsewhere.
+
 No special permissions are needed: any user can read `/dev/snd` and `/proc/asound`.
 
 ## Hooks
@@ -67,7 +69,7 @@ The new state and its details are passed in environment variables. All of them a
 | Variable | Example | Meaning |
 |---|---|---|
 | `PLAYBACK_STATE` | `playing` | The new state: `playing` or `stopped` |
-| `PLAYBACK_TIME` | `2026-09-27 10:00:01` | When the change happened, as logged |
+| `PLAYBACK_TIME` | `2026-09-27 10:00:01` | When the change happened, in the monitor's timestamp format (set even under systemd) |
 | `PLAYBACK_DETAILS` | `hw:0,0 librespot[539] RUNNING S16_LE 44100Hz 2ch` | The logged details of every open stream |
 | `PLAYBACK_DEVICE` | `hw:0,0` | The first open stream's device |
 | `PLAYBACK_PROGRAM` | `librespot` | The program playing on it |
@@ -103,7 +105,7 @@ A hook that can't be started logs `hook failed for …` with the reason, such as
 
 ## The service
 
-The service's output goes to the journal. `./log.sh` prints it, and passes any extra arguments on to `journalctl`:
+The service's output goes to the journal. `./log.sh` prints it with the journal's timestamps, and passes any extra arguments on to `journalctl`:
 
 ```bash
 ./log.sh                 # everything so far

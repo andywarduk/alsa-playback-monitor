@@ -16,10 +16,14 @@ mod asound;
 mod hook;
 mod tracker;
 
+use std::env;
 use std::ffi::OsStr;
+use std::fs::File;
 use std::io::{self, Write};
 use std::os::fd::AsFd;
+use std::os::unix::fs::MetadataExt;
 use std::process;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use chrono::Local;
@@ -59,11 +63,32 @@ fn timestamp() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-/// Print `text` as one output line stamped with `time`. Used from both the
-/// main thread and the hook worker; the lock keeps their lines whole.
+/// Whether stdout is the systemd journal, which timestamps every line itself.
+/// systemd sets JOURNAL_STREAM to the journal stream's "device:inode".
+/// Comparing that with stdout's own avoids being fooled by a value inherited
+/// by a process whose output has been redirected elsewhere.
+static STDOUT_IS_JOURNAL: LazyLock<bool> = LazyLock::new(|| {
+    let Ok(stream) = env::var("JOURNAL_STREAM") else {
+        return false;
+    };
+    let Ok(stdout) = io::stdout().as_fd().try_clone_to_owned() else {
+        return false;
+    };
+    File::from(stdout)
+        .metadata()
+        .is_ok_and(|meta| stream == format!("{}:{}", meta.dev(), meta.ino()))
+});
+
+/// Print `text` as one output line stamped with `time`, or unstamped when
+/// the journal adds its own. Used from both the main thread and the hook
+/// worker; the lock keeps their lines whole.
 fn log_at(time: &str, text: &str) {
     let mut out = io::stdout().lock();
-    let _ = writeln!(out, "{time} {text}");
+    let _ = if *STDOUT_IS_JOURNAL {
+        writeln!(out, "{text}")
+    } else {
+        writeln!(out, "{time} {text}")
+    };
     let _ = out.flush();
 }
 
