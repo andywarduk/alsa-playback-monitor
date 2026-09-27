@@ -36,7 +36,7 @@ To install under `/usr` instead, run `PREFIX=/usr ./install.sh`; the hook stays 
 ## Usage
 
 ```bash
-alsa-playback-monitor --hook /usr/local/bin/amp.sh --stop-delay 30
+alsa-playback-monitor --hook /usr/local/bin/amp.sh --stop-hook-delay 300
 ```
 
 | Option | Default | Meaning |
@@ -44,6 +44,7 @@ alsa-playback-monitor --hook /usr/local/bin/amp.sh --stop-delay 30
 | `--hook PROGRAM` | | Program to run on each change of state (see [Hooks](#hooks)) |
 | `--start-delay SEC` | `0.2` | Playback must last this long before it is reported |
 | `--stop-delay SEC` | `1.0` | Silence must last this long before it is reported |
+| `--stop-hook-delay SEC` | `0` | Run the hook for `stopped` this long after it is reported, unless playback resumes first (see [Hooks](#hooks)) |
 
 Options also accept the `--option=value` form.
 
@@ -103,6 +104,19 @@ Hooks run on a separate thread, one at a time and in order. A slow hook never de
 
 A hook that can't be started logs `hook failed for …` with the reason, such as a missing file or missing execute permission.
 
+`--stop-hook-delay SEC` holds back the hook for `stopped` while still logging the stop when it happens. That suits an amplifier that should stay on through pauses between tracks or short breaks. If playback resumes within the delay, the pending hook is cancelled. The next `playing` then runs no hook either, because the hook never saw a stop. With `--stop-hook-delay 3`:
+
+```
+2026-09-27 07:59:22 stopped
+2026-09-27 07:59:23 playing  hw:0,0 aplay[26966] RUNNING S16_LE 44100Hz 2ch
+2026-09-27 07:59:23 hook for stopped cancelled: playing again 0.7s after the change
+2026-09-27 07:59:24 stopped
+2026-09-27 07:59:27 hook started for stopped, 3.0s after the change
+2026-09-27 07:59:27 hook finished for stopped after 0.0s: exit 0
+```
+
+`PLAYBACK_TIME` is still the time of the stop itself, not of the delayed hook run.
+
 ## The service
 
 The service's output goes to the journal. `./log.sh` prints it with the journal's timestamps, and passes any extra arguments on to `journalctl`:
@@ -113,7 +127,7 @@ The service's output goes to the journal. `./log.sh` prints it with the journal'
 ./log.sh --since today
 ```
 
-The service runs `/etc/alsa-playback-monitor/hook.sh` with `--stop-delay 300`. So "stopped" is reported, and the hook run, only after 5 minutes of silence, and pauses between tracks or short breaks don't trigger it. To change what happens on each change, edit that script. No restart is needed: it's run afresh each time.
+The service runs `/etc/alsa-playback-monitor/hook.sh` with `--stop-hook-delay 300`. So "stopped" is logged when playback stops, but its hook runs only after 5 more minutes of silence, and pauses between tracks or short breaks don't trigger it. To change what happens on each change, edit that script. No restart is needed: it's run afresh each time.
 
 To change the options instead, such as the stop delay or which hook runs, override `ExecStart` with a drop-in:
 
@@ -126,7 +140,7 @@ In the editor, add:
 ```ini
 [Service]
 ExecStart=
-ExecStart=/usr/local/bin/alsa-playback-monitor --hook /etc/alsa-playback-monitor/hook.sh --stop-delay 60
+ExecStart=/usr/local/bin/alsa-playback-monitor --hook /etc/alsa-playback-monitor/hook.sh --stop-hook-delay 60
 ```
 
 The empty `ExecStart=` line is required: it clears the original command. The override is stored in `/etc/systemd/system/alsa-playback-monitor.service.d/` and survives reinstalls.

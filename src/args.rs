@@ -5,6 +5,7 @@ use std::time::Duration;
 
 const USAGE: &str = "\
 usage: alsa-playback-monitor [--hook PROGRAM] [--start-delay SEC] [--stop-delay SEC]
+                             [--stop-hook-delay SEC]
 
 Report when ALSA playback starts and stops.
 
@@ -13,12 +14,16 @@ options:
                      \"stopped\") and details are in PLAYBACK_* variables
   --start-delay SEC  playback must last this long before it is reported (default 0.2)
   --stop-delay SEC   silence must last this long before it is reported (default 1.0)
+  --stop-hook-delay SEC
+                     run the hook for \"stopped\" this long after it is reported,
+                     unless playback resumes first (default 0)
 ";
 
 pub struct Args {
     pub hook: Option<String>,
     pub start_delay: Duration,
     pub stop_delay: Duration,
+    pub stop_hook_delay: Duration,
 }
 
 impl Args {
@@ -28,6 +33,7 @@ impl Args {
             hook: None,
             start_delay: Duration::from_millis(200),
             stop_delay: Duration::from_secs(1),
+            stop_hook_delay: Duration::ZERO,
         };
         let mut argv = std::env::args().skip(1);
         while let Some(arg) = argv.next() {
@@ -40,7 +46,7 @@ impl Args {
                     print!("{USAGE}");
                     process::exit(0);
                 }
-                "--hook" | "--start-delay" | "--stop-delay" => {}
+                "--hook" | "--start-delay" | "--stop-delay" | "--stop-hook-delay" => {}
                 _ => usage_error(&format!("unrecognized argument: {arg}")),
             }
             let Some(value) = inline.or_else(|| argv.next()) else {
@@ -49,7 +55,8 @@ impl Args {
             match flag {
                 "--hook" => args.hook = Some(value).filter(|program| !program.is_empty()),
                 "--start-delay" => args.start_delay = seconds(flag, &value),
-                _ => args.stop_delay = seconds(flag, &value),
+                "--stop-delay" => args.stop_delay = seconds(flag, &value),
+                _ => args.stop_hook_delay = seconds(flag, &value),
             }
         }
         args

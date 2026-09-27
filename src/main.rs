@@ -123,7 +123,7 @@ fn run(args: &Args) -> io::Result<()> {
     let active = asound::open_substreams();
     let mut tracker = Tracker::new(asound::count_open(&active), args.start_delay, args.stop_delay);
     report(tracker.playing(), &asound::streams(&active));
-    let hook = args.hook.clone().map(Hook::spawn);
+    let hook = args.hook.clone().map(|program| Hook::spawn(program, args.stop_hook_delay));
 
     loop {
         if wait_readable(&inotify, tracker.timeout(Instant::now()))? {
